@@ -1,71 +1,29 @@
 import Phaser from 'phaser';
 
-type Enemy = { body: Phaser.GameObjects.Container; lane: number; hp: number; speed: number; dead: boolean };
-type Defender = { body: Phaser.GameObjects.Container; lane: number; col: number; nextShot: number };
-type Shot = { dot: Phaser.GameObjects.Arc; lane: number; damage: number };
-
-export class GameScene extends Phaser.Scene {
-  private readonly rows=5; private readonly cols=9;
-  private readonly left=185; private readonly top=125; private readonly cellW=105; private readonly cellH=90;
-  private enemies: Enemy[]=[]; private defenders: Defender[]=[]; private shots: Shot[]=[];
-  private occupied=new Set<string>(); private nextSpawn=0; private cash=300; private cashText!: Phaser.GameObjects.Text;
-
-  constructor(){ super('game'); }
-  create(){
-    this.add.rectangle(640,360,1280,720,0xd9e9c6);
-    this.add.rectangle(82,350,145,500,0x9bc7b1).setStrokeStyle(5,0x386b5d);
-    this.add.text(82,80,'조제실',{fontFamily:'sans-serif',fontSize:'28px',color:'#173c31',fontStyle:'bold'}).setOrigin(.5);
-    this.add.text(1170,80,'약국 입구 →',{fontFamily:'sans-serif',fontSize:'25px',color:'#7b2d20',fontStyle:'bold'}).setOrigin(.5);
-    this.drawGrid();
-    this.cashText=this.add.text(25,18,'💰 300',{fontFamily:'sans-serif',fontSize:'28px',color:'#183329',fontStyle:'bold'});
-    this.add.text(640,35,'약국 디펜스  ·  Phase 1–2 Prototype',{fontFamily:'sans-serif',fontSize:'25px',color:'#183329',fontStyle:'bold'}).setOrigin(.5);
-    this.add.text(640,675,'빈 칸을 터치하면 기본 공격약 설치 (100원)',{fontFamily:'sans-serif',fontSize:'24px',color:'#183329'}).setOrigin(.5);
-    this.input.on('pointerdown',(p:Phaser.Input.Pointer)=>this.place(p.x,p.y));
-    this.time.addEvent({delay:2500,loop:true,callback:()=>{this.cash+=25;this.updateCash();}});
-  }
-  private drawGrid(){
-    for(let r=0;r<this.rows;r++) for(let c=0;c<this.cols;c++){
-      const x=this.left+c*this.cellW+this.cellW/2,y=this.top+r*this.cellH+this.cellH/2;
-      this.add.rectangle(x,y,this.cellW-3,this.cellH-3,(r+c)%2?0xbad998:0xcbe7aa,.9).setStrokeStyle(2,0x7fa36d);
-    }
-  }
-  private place(x:number,y:number){
-    const c=Math.floor((x-this.left)/this.cellW),r=Math.floor((y-this.top)/this.cellH);
-    if(c<0||c>=this.cols||r<0||r>=this.rows||this.cash<100||this.occupied.has(`${r}:${c}`))return;
-    this.cash-=100;this.updateCash();this.occupied.add(`${r}:${c}`);
-    const cx=this.left+c*this.cellW+this.cellW/2,cy=this.top+r*this.cellH+this.cellH/2;
-    const shadow=this.add.ellipse(0,25,58,16,0x000000,.18);
-    const pill=this.add.rectangle(0,0,48,30,0xffffff).setStrokeStyle(4,0x244d42);
-    const half=this.add.rectangle(-12,0,24,28,0xf05b61);
-    const body=this.add.container(cx,cy,[shadow,pill,half]);
-    this.defenders.push({body,lane:r,col:c,nextShot:0});
-  }
-  private spawn(){
-    const lane=Phaser.Math.Between(0,4),y=this.top+lane*this.cellH+this.cellH/2;
-    const shadow=this.add.ellipse(0,28,55,15,0x000000,.2);
-    const head=this.add.circle(0,-10,24,0xf0c59e).setStrokeStyle(3,0x513c31);
-    const torso=this.add.rectangle(0,23,43,46,0x7185a6).setStrokeStyle(3,0x38485f);
-    const face=this.add.text(0,-10,'😠',{fontSize:'24px'}).setOrigin(.5);
-    const body=this.add.container(1215,y,[shadow,torso,head,face]);
-    this.enemies.push({body,lane,hp:100,speed:32,dead:false});
-  }
-  private shoot(d:Defender,time:number){
-    const target=this.enemies.find(e=>!e.dead&&e.lane===d.lane&&e.body.x>d.body.x);
-    if(!target||time<d.nextShot)return; d.nextShot=time+1100;
-    d.body.setScale(1.08);this.tweens.add({targets:d.body,scale:1,duration:130});
-    const dot=this.add.circle(d.body.x+30,d.body.y-3,10,0xf04e55).setStrokeStyle(2,0x6e2629);
-    this.shots.push({dot,lane:d.lane,damage:25});
-  }
-  update(time:number,delta:number){
-    if(time>this.nextSpawn){this.spawn();this.nextSpawn=time+Phaser.Math.Between(1800,3000);}
-    for(const d of this.defenders)this.shoot(d,time);
-    for(const e of this.enemies){if(e.dead)continue;e.body.x-=e.speed*delta/1000;if(e.body.x<145){e.dead=true;e.body.destroy();}}
-    for(const s of [...this.shots]){
-      s.dot.x+=360*delta/1000;
-      const hit=this.enemies.find(e=>!e.dead&&e.lane===s.lane&&Math.abs(e.body.x-s.dot.x)<28);
-      if(hit){hit.hp-=s.damage;s.dot.destroy();this.shots.splice(this.shots.indexOf(s),1);hit.body.setAlpha(.45);this.tweens.add({targets:hit.body,alpha:1,duration:100});if(hit.hp<=0){hit.dead=true;this.tweens.add({targets:hit.body,alpha:0,y:hit.body.y+20,duration:250,onComplete:()=>hit.body.destroy()});}}
-      else if(s.dot.x>1280){s.dot.destroy();this.shots.splice(this.shots.indexOf(s),1);}
-    }
-  }
-  private updateCash(){this.cashText.setText(`💰 ${this.cash}`);}
+type UnitKind='pill'|'vitamin'|'bandage'|'patch'|'heal'|'heavy';
+type Unit={body:Phaser.GameObjects.Container;lane:number;col:number;kind:UnitKind;hp:number;maxHp:number;next:number};
+type Enemy={body:Phaser.GameObjects.Container;lane:number;hp:number;maxHp:number;speed:number;damage:number;nextHit:number;dead:boolean};
+type Shot={dot:Phaser.GameObjects.Arc;lane:number;damage:number;slow:boolean};
+const UNITS:Record<UnitKind,{name:string,cost:number,hp:number,color:number}>={pill:{name:'기본약',cost:100,hp:120,color:0xf05b61},vitamin:{name:'영양제',cost:50,hp:90,color:0xf6c453},bandage:{name:'밴드',cost:50,hp:450,color:0xdca678},patch:{name:'파스',cost:125,hp:110,color:0x6bbbd1},heal:{name:'연고',cost:100,hp:100,color:0x75bd78},heavy:{name:'강공격',cost:175,hp:130,color:0x9b70c8}};
+export class GameScene extends Phaser.Scene{
+ private rows=5;private cols=9;private left=175;private top=105;private cellW=105;private cellH=88;
+ private units:Unit[]=[];private enemies:Enemy[]=[];private shots:Shot[]=[];private occupied=new Set<string>();
+ private cash=300;private lives=5;private wave=1;private kills=0;private spawned=0;private waveTarget=8;private nextSpawn=0;private selected:UnitKind='pill';private paused=false;private gameEnded=false;
+ private cashText!:Phaser.GameObjects.Text;private statusText!:Phaser.GameObjects.Text;private cards:Phaser.GameObjects.Container[]=[];
+ constructor(){super('game')}
+ create(){this.add.rectangle(640,360,1280,720,0xe7efd8);this.add.rectangle(75,330,135,470,0xa7d0bd).setStrokeStyle(4,0x386b5d);this.add.text(75,70,'조제실',{fontSize:'25px',color:'#173c31',fontStyle:'bold'}).setOrigin(.5);this.add.text(1170,70,'약국 입구 →',{fontSize:'23px',color:'#7b2d20',fontStyle:'bold'}).setOrigin(.5);this.drawGrid();this.cashText=this.add.text(20,15,'',{fontSize:'25px',color:'#173c31',fontStyle:'bold'});this.statusText=this.add.text(640,24,'',{fontSize:'23px',color:'#173c31',fontStyle:'bold'}).setOrigin(.5);const pause=this.add.text(1225,22,'Ⅱ',{fontSize:'30px',color:'#173c31',backgroundColor:'#ffffff'}).setOrigin(.5).setPadding(12,5).setInteractive();pause.on('pointerdown',()=>this.togglePause());this.makeCards();this.updateUI();this.time.addEvent({delay:2500,loop:true,callback:()=>{if(!this.paused&&!this.gameEnded){this.cash+=25;this.updateUI()}}});}
+ private drawGrid(){for(let r=0;r<5;r++){this.add.text(145,this.top+r*this.cellH+44,`${r+1}`,{fontSize:'18px',color:'#476858'}).setOrigin(.5);for(let c=0;c<9;c++){let x=this.left+c*this.cellW+52.5,y=this.top+r*this.cellH+44;this.add.rectangle(x,y,102,85,(r+c)%2?0xc4dda5:0xd4e8b5).setStrokeStyle(1,0x8aaa75).setInteractive().on('pointerdown',()=>this.place(r,c));}}}
+ private makeCards(){(Object.keys(UNITS) as UnitKind[]).forEach((k,i)=>{let x=300+i*130,y=625;let bg=this.add.rectangle(0,0,118,76,0xffffff,.95).setStrokeStyle(3,0x58755e);let icon=this.add.circle(-35,-8,15,UNITS[k].color);let t=this.add.text(8,-10,`${UNITS[k].name}\n💰${UNITS[k].cost}`,{fontSize:'15px',color:'#183329'}).setOrigin(.5);let c=this.add.container(x,y,[bg,icon,t]).setSize(118,76).setInteractive();c.on('pointerdown',()=>{this.selected=k;this.refreshCards()});this.cards.push(c)});this.refreshCards()}
+ private refreshCards(){(Object.keys(UNITS) as UnitKind[]).forEach((k,i)=>this.cards[i].setScale(k===this.selected?1.08:1));}
+ private place(r:number,c:number){if(this.paused||this.gameEnded)return;let d=UNITS[this.selected],key=`${r}:${c}`;if(this.occupied.has(key)||this.cash<d.cost)return;this.cash-=d.cost;this.occupied.add(key);let x=this.left+c*this.cellW+52.5,y=this.top+r*this.cellH+44;let shadow=this.add.ellipse(0,26,58,14,0x000000,.18);let shape=this.add.circle(0,0,27,d.color).setStrokeStyle(4,0x345044);let label=this.add.text(0,0,this.selected==='vitamin'?'💊':this.selected==='bandage'?'🩹':'●',{fontSize:'20px',color:'#fff'}).setOrigin(.5);let body=this.add.container(x,y,[shadow,shape,label]);this.units.push({body,lane:r,col:c,kind:this.selected,hp:d.hp,maxHp:d.hp,next:0});this.updateUI()}
+ private spawn(){let lane=Phaser.Math.Between(0,4),y=this.top+lane*this.cellH+44;let hp=80+this.wave*30;let shadow=this.add.ellipse(0,27,52,14,0x000000,.18);let torso=this.add.rectangle(0,20,42,45,0x7185a6).setStrokeStyle(3,0x38485f);let head=this.add.circle(0,-10,23,0xf0c59e).setStrokeStyle(3,0x513c31);let face=this.add.text(0,-10,this.wave===3?'😡':'😠',{fontSize:'23px'}).setOrigin(.5);let body=this.add.container(1220,y,[shadow,torso,head,face]);this.enemies.push({body,lane,hp,maxHp:hp,speed:25+this.wave*5,damage:18+this.wave*4,nextHit:0,dead:false});this.spawned++}
+ private shoot(u:Unit,time:number){if(u.kind==='bandage')return;if(u.kind==='vitamin'){if(time>=u.next){u.next=time+5000;this.cash+=35;this.floatText(u.body.x,u.body.y-35,'+35💰');this.updateUI()}return}if(u.kind==='heal'){if(time>=u.next){u.next=time+2500;this.units.filter(v=>v.lane===u.lane&&Math.abs(v.col-u.col)<=1).forEach(v=>v.hp=Math.min(v.maxHp,v.hp+20));this.floatText(u.body.x,u.body.y-35,'+HP');}return}let target=this.enemies.find(e=>!e.dead&&e.lane===u.lane&&e.body.x>u.body.x);if(!target||time<u.next)return;u.next=time+(u.kind==='heavy'?1800:1100);let dmg=u.kind==='heavy'?55:u.kind==='patch'?18:25;let dot=this.add.circle(u.body.x+28,u.body.y-4,9,UNITS[u.kind].color).setStrokeStyle(2,0x4a3434);this.shots.push({dot,lane:u.lane,damage:dmg,slow:u.kind==='patch'});this.tweens.add({targets:u.body,scaleX:1.1,scaleY:.92,yoyo:true,duration:90})}
+ private removeUnit(u:Unit){this.occupied.delete(`${u.lane}:${u.col}`);this.units.splice(this.units.indexOf(u),1);u.body.destroy()}
+ private killEnemy(e:Enemy){if(e.dead)return;e.dead=true;this.kills++;this.cash+=20;this.tweens.add({targets:e.body,alpha:0,angle:25,y:e.body.y+25,duration:260,onComplete:()=>e.body.destroy()});this.updateUI();this.checkWave()}
+ private checkWave(){if(this.kills>=this.waveTarget){if(this.wave>=3){this.gameEnded=true;this.showOverlay('🎉 영업 종료!\n오늘도 약국을 지켰습니다.','다시 하기');return}this.wave++;this.kills=0;this.spawned=0;this.waveTarget=8+this.wave*3;this.nextSpawn=this.time.now+2500;this.floatText(640,330,`WAVE ${this.wave}`);this.updateUI()}}
+ private togglePause(){if(this.gameEnded)return;this.paused=!this.paused;this.physics.world.isPaused=this.paused;if(this.paused)this.showOverlay('일시정지','계속하기',true)}
+ private showOverlay(title:string,button:string,pauseOnly=false){let shade=this.add.rectangle(640,360,1280,720,0x000000,.55).setDepth(50);let panel=this.add.rectangle(640,350,470,230,0xffffff).setDepth(51).setStrokeStyle(5,0x4c725e);let txt=this.add.text(640,315,title,{fontSize:'31px',color:'#173c31',align:'center',fontStyle:'bold'}).setOrigin(.5).setDepth(52);let b=this.add.text(640,405,button,{fontSize:'23px',color:'#fff',backgroundColor:'#4d8068'}).setPadding(28,12).setOrigin(.5).setDepth(52).setInteractive();b.on('pointerdown',()=>{shade.destroy();panel.destroy();txt.destroy();b.destroy();if(pauseOnly)this.paused=false;else this.scene.restart()})}
+ private floatText(x:number,y:number,s:string){let t=this.add.text(x,y,s,{fontSize:'22px',color:'#174f3c',fontStyle:'bold'}).setOrigin(.5).setDepth(20);this.tweens.add({targets:t,y:y-35,alpha:0,duration:800,onComplete:()=>t.destroy()})}
+ update(time:number,delta:number){if(this.paused||this.gameEnded)return;if(this.spawned<this.waveTarget&&time>this.nextSpawn){this.spawn();this.nextSpawn=time+Phaser.Math.Between(1400,2400)}for(let u of [...this.units])this.shoot(u,time);for(let e of this.enemies){if(e.dead)continue;let blocker=this.units.filter(u=>u.lane===e.lane&&u.body.x<e.body.x).sort((a,b)=>b.body.x-a.body.x)[0];if(blocker&&e.body.x-blocker.body.x<55){if(time>=e.nextHit){e.nextHit=time+900;blocker.hp-=e.damage;blocker.body.setAlpha(.45);this.tweens.add({targets:blocker.body,alpha:1,duration:100});if(blocker.hp<=0)this.removeUnit(blocker)}}else e.body.x-=e.speed*delta/1000;if(e.body.x<140){e.dead=true;e.body.destroy();this.lives--;this.updateUI();if(this.lives<=0){this.gameEnded=true;this.showOverlay('💥 조제실이 뚫렸습니다!','다시 하기')}}}for(let s of [...this.shots]){s.dot.x+=380*delta/1000;let hit=this.enemies.find(e=>!e.dead&&e.lane===s.lane&&Math.abs(e.body.x-s.dot.x)<30);if(hit){hit.hp-=s.damage;if(s.slow)hit.speed=Math.max(10,hit.speed*.7);s.dot.destroy();this.shots.splice(this.shots.indexOf(s),1);hit.body.setAlpha(.45);this.tweens.add({targets:hit.body,alpha:1,duration:100});if(hit.hp<=0)this.killEnemy(hit)}else if(s.dot.x>1280){s.dot.destroy();this.shots.splice(this.shots.indexOf(s),1)}}}
+ private updateUI(){this.cashText.setText(`💰 ${this.cash}    ❤️ ${this.lives}`);this.statusText.setText(`STAGE 1   ·   WAVE ${this.wave}/3   ·   ${this.kills}/${this.waveTarget}`)}
 }

@@ -1,0 +1,87 @@
+name: Deploy current game to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare static game
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+          import re
+
+          origin = "https://pharmacy-defense.moschus1.chatgpt.site"
+          prefix = "/pharmacy-defense"
+          out = Path("_site")
+
+          def fetch(path):
+              req = Request(origin + path, headers={"User-Agent": "GitHub-Pages-Mirror"})
+              return urlopen(req, timeout=60).read()
+
+          def save(path, data):
+              target = out / path.lstrip("/")
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(data)
+
+          html = fetch("/").decode("utf-8")
+          save("/index.html", html.encode("utf-8"))
+
+          page_assets = set(re.findall(r'(?:src|href)="(/assets/[^"]+)"', html))
+          page_assets.add("/favicon.svg")
+          for path in sorted(page_assets):
+              save(path, fetch(path))
+
+          images = [
+              "/backgrounds/modern-pharmacy.png",
+              "/sprites/vitamin.png",
+              "/sprites/cabinet.png",
+              "/sprites/pharmacist-animation-atlas.png",
+              "/sprites/staff-animation-atlas.png",
+          ]
+          for kind in ("customer", "sales", "doctor", "landlord"):
+              images.extend(f"/sprites/zombies/{kind}-{frame}.png" for frame in range(7))
+          for path in images:
+              save(path, fetch(path))
+
+          for path in out.rglob("*"):
+              if not path.is_file() or path.suffix not in {".html", ".css", ".js"}:
+                  continue
+              text = path.read_text("utf-8")
+              for root in ("/assets/", "/sprites/", "/backgrounds/"):
+                  text = text.replace(root, prefix + root)
+              text = text.replace('"/favicon.svg"', f'"{prefix}/favicon.svg"')
+              text = text.replace("'/favicon.svg'", f"'{prefix}/favicon.svg'")
+              path.write_text(text, "utf-8")
+
+          (out / ".nojekyll").write_text("", "utf-8")
+          PY
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
